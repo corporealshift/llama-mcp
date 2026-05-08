@@ -78,3 +78,55 @@ def test_tool_schemas_have_required_shape():
     for s in TOOL_SCHEMAS:
         assert s["type"] == "function"
         assert "parameters" in s["function"]
+
+
+def test_write_file_creates_file(working_dir: Path, ctx: ToolContext):
+    out = write_file(ctx, {"path": "new.txt", "content": "hello"})
+    assert out["bytes_written"] == 5
+    assert (working_dir / "new.txt").read_text() == "hello"
+    assert "new.txt" in {Path(p).name for p in ctx.files_changed}
+
+
+def test_write_file_creates_parent_dirs(working_dir: Path, ctx: ToolContext):
+    write_file(ctx, {"path": "deep/nested/file.txt", "content": "x"})
+    assert (working_dir / "deep/nested/file.txt").read_text() == "x"
+
+
+def test_write_file_overwrites(working_dir: Path, ctx: ToolContext):
+    (working_dir / "f.txt").write_text("old")
+    write_file(ctx, {"path": "f.txt", "content": "new"})
+    assert (working_dir / "f.txt").read_text() == "new"
+
+
+def test_write_file_sandbox_escape_raises(ctx: ToolContext):
+    with pytest.raises(SandboxEscape):
+        write_file(ctx, {"path": "../bad.txt", "content": "x"})
+
+
+def test_edit_file_replaces_unique_string(working_dir: Path, ctx: ToolContext):
+    (working_dir / "f.txt").write_text("foo bar baz")
+    out = edit_file(ctx, {"path": "f.txt", "old": "bar", "new": "qux"})
+    assert out["replacements"] == 1
+    assert (working_dir / "f.txt").read_text() == "foo qux baz"
+    assert "f.txt" in {Path(p).name for p in ctx.files_changed}
+
+
+def test_edit_file_errors_when_old_not_unique(working_dir: Path, ctx: ToolContext):
+    (working_dir / "f.txt").write_text("xx xx")
+    with pytest.raises(ValueError, match="not unique"):
+        edit_file(ctx, {"path": "f.txt", "old": "xx", "new": "yy"})
+
+
+def test_edit_file_replace_all(working_dir: Path, ctx: ToolContext):
+    (working_dir / "f.txt").write_text("xx xx")
+    out = edit_file(ctx, {
+        "path": "f.txt", "old": "xx", "new": "yy", "replace_all": True
+    })
+    assert out["replacements"] == 2
+    assert (working_dir / "f.txt").read_text() == "yy yy"
+
+
+def test_edit_file_errors_when_old_missing(working_dir: Path, ctx: ToolContext):
+    (working_dir / "f.txt").write_text("foo")
+    with pytest.raises(ValueError, match="not found"):
+        edit_file(ctx, {"path": "f.txt", "old": "missing", "new": "x"})

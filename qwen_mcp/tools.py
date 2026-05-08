@@ -72,11 +72,35 @@ def glob_(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 # (filled in next task)
 
 def write_file(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    raise NotImplementedError
+    path = safe_resolve(ctx.working_dir, args["path"])
+    content: str = args["content"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = content.encode("utf-8")
+    path.write_bytes(data)
+    ctx.files_changed.add(str(path))
+    return {"bytes_written": len(data)}
 
 
 def edit_file(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    raise NotImplementedError
+    path = safe_resolve(ctx.working_dir, args["path"])
+    old: str = args["old"]
+    new: str = args["new"]
+    replace_all: bool = args.get("replace_all", False)
+
+    text = path.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count == 0:
+        raise ValueError(f"old string not found in {args['path']}")
+    if count > 1 and not replace_all:
+        raise ValueError(
+            f"old string not unique in {args['path']} ({count} matches); "
+            "set replace_all=true to replace every occurrence"
+        )
+
+    new_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    path.write_text(new_text, encoding="utf-8")
+    ctx.files_changed.add(str(path))
+    return {"replacements": count if replace_all else 1}
 
 
 def run_command(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
