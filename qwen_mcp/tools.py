@@ -104,7 +104,38 @@ def edit_file(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_command(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    raise NotImplementedError
+    command: str = args["command"]
+    timeout: int = min(args.get("timeout", 120), 600)
+
+    ctx.commands_run.append(command)
+
+    start = _now_ms()
+    try:
+        proc = subprocess.run(
+            ["bash", "-lc", command],
+            cwd=ctx.working_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        stdout, stderr, exit_code, timed_out = proc.stdout, proc.stderr, proc.returncode, False
+    except subprocess.TimeoutExpired as e:
+        stdout = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        stderr = e.stderr.decode("utf-8", "replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+        exit_code = -1
+        timed_out = True
+    duration_ms = _now_ms() - start
+
+    truncated_stdout, stdout_trunc = _truncate(stdout, MAX_RESULT_BYTES)
+    truncated_stderr, stderr_trunc = _truncate(stderr, MAX_RESULT_BYTES)
+    return {
+        "stdout": truncated_stdout,
+        "stderr": truncated_stderr,
+        "exit_code": exit_code,
+        "duration_ms": duration_ms,
+        "truncated": stdout_trunc or stderr_trunc,
+        "timed_out": timed_out,
+    }
 
 
 # ---- Schemas + dispatcher ----------------------------------------------------
@@ -226,3 +257,17 @@ def dispatch(ctx: ToolContext, name: str, args: dict[str, Any]) -> dict[str, Any
         return handler(ctx, args)
     except Exception as e:  # noqa: BLE001 — intentional broad catch
         return {"error": f"{type(e).__name__}: {e}"}
+
+
+# ---- Private helpers ---------------------------------------------------------
+
+def _now_ms() -> int:
+    import time
+    return int(time.monotonic() * 1000)
+
+
+def _truncate(s: str, max_bytes: int) -> tuple[str, bool]:
+    encoded = s.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return s, False
+    return encoded[:max_bytes].decode("utf-8", "replace"), True

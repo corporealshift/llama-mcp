@@ -130,3 +130,35 @@ def test_edit_file_errors_when_old_missing(working_dir: Path, ctx: ToolContext):
     (working_dir / "f.txt").write_text("foo")
     with pytest.raises(ValueError, match="not found"):
         edit_file(ctx, {"path": "f.txt", "old": "missing", "new": "x"})
+
+
+def test_run_command_captures_stdout(ctx: ToolContext):
+    out = run_command(ctx, {"command": "echo hello"})
+    assert out["exit_code"] == 0
+    assert out["stdout"].strip() == "hello"
+    assert out["timed_out"] is False
+    assert "echo hello" in ctx.commands_run
+
+
+def test_run_command_captures_stderr_and_exit_code(ctx: ToolContext):
+    out = run_command(ctx, {"command": "echo err >&2; exit 3"})
+    assert out["exit_code"] == 3
+    assert "err" in out["stderr"]
+
+
+def test_run_command_runs_in_working_dir(working_dir: Path, ctx: ToolContext):
+    (working_dir / "marker").write_text("yes")
+    out = run_command(ctx, {"command": "ls"})
+    assert "marker" in out["stdout"]
+
+
+def test_run_command_truncates_large_output(ctx: ToolContext):
+    out = run_command(ctx, {"command": "yes x | head -c 20000"})
+    assert out["truncated"] is True
+    assert len(out["stdout"]) <= 8 * 1024
+
+
+def test_run_command_times_out(ctx: ToolContext):
+    out = run_command(ctx, {"command": "sleep 5", "timeout": 1})
+    assert out["timed_out"] is True
+    assert out["exit_code"] == -1
