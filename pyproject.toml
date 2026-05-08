@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwen-mcp"
+version = "0.1.0"
+description = "MCP server that delegates code-writing subtasks to local Qwen via llama.cpp"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.2.0",
+    "openai>=1.40.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+qwen-mcp = "qwen_mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["qwen_mcp*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
