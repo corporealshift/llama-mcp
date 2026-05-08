@@ -8,6 +8,7 @@ from qwen_mcp.sandbox import SandboxEscape
 from qwen_mcp.tools import (
     TOOL_SCHEMAS,
     ToolContext,
+    dispatch,
     edit_file,
     glob_,
     list_dir,
@@ -162,3 +163,22 @@ def test_run_command_times_out(ctx: ToolContext):
     out = run_command(ctx, {"command": "sleep 5", "timeout": 1})
     assert out["timed_out"] is True
     assert out["exit_code"] == -1
+
+
+def test_dispatch_unknown_tool(ctx: ToolContext):
+    out = dispatch(ctx, "no_such_tool", {})
+    assert "error" in out
+    assert "unknown tool" in out["error"]
+
+
+def test_dispatch_converts_sandbox_escape_to_error(ctx: ToolContext):
+    out = dispatch(ctx, "read_file", {"path": "../escape"})
+    assert "error" in out
+    assert "SandboxEscape" in out["error"]
+
+
+def test_dispatch_happy_path(working_dir: Path, ctx: ToolContext):
+    (working_dir / "f.txt").write_text("ok")
+    out = dispatch(ctx, "read_file", {"path": "f.txt"})
+    assert out.get("content") == "ok"
+    assert "error" not in out
