@@ -102,3 +102,59 @@ def test_writes_transcript_file(working_dir: Path):
     assert transcript_path.exists()
     contents = transcript_path.read_text()
     assert "assistant" in contents
+
+
+def _looping_tool_call_response():
+    """A response that always asks to read a file — would loop forever."""
+    return FakeResponse(FakeMessage(content=None, tool_calls=[
+        FakeToolCall(f"c{int.from_bytes(b'x','big')}", "list_dir", {"path": "."}),
+    ]), usage=FakeUsage(50))
+
+
+def test_max_steps_enforced(working_dir: Path):
+    client = ScriptedClient([_looping_tool_call_response() for _ in range(20)])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="loop",
+        context_hints=[], max_steps=3, timeout_seconds=60,
+        max_tokens_total=1_000_000,
+    )
+    assert result.stop_reason == "max_steps"
+    assert result.steps == 3
+
+
+def test_token_limit_enforced(working_dir: Path):
+    """Total tokens crosses the cap before the loop exits naturally."""
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content=None, tool_calls=[
+            FakeToolCall("c1", "list_dir", {"path": "."}),
+        ]), usage=FakeUsage(700)),
+        FakeResponse(FakeMessage(content=None, tool_calls=[
+            FakeToolCall("c2", "list_dir", {"path": "."}),
+        ]), usage=FakeUsage(700)),
+        # Should not be reached — token cap trips first.
+        FakeResponse(FakeMessage(content="never seen"), usage=FakeUsage(10)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=1000,
+    )
+    assert result.stop_reason == "token_limit"
+
+
+def test_timeout_enforced(working_dir: Path, monkeypatch):
+    """Timeout is checked at top of loop; we fake the clock."""
+    import qwen_mcp.agent as agent_mod
+    fake_now = [1000.0]
+    def fake_monotonic():
+        fake_now[0] += 0.6
+        return fake_now[0]
+    monkeypatch.setattr(agent_mod.time, "monotonic", fake_monotonic)
+
+    client = ScriptedClient([_looping_tool_call_response() for _ in range(50)])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=100, timeout_seconds=2,
+        max_tokens_total=1_000_000,
+    )
+    assert result.stop_reason == "timeout"
