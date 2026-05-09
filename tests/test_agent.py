@@ -1,0 +1,104 @@
+"""Tests for the agent loop using a scripted fake OpenAI client."""
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from qwen_mcp.agent import AgentResult, run_delegation
+
+
+class FakeMessage:
+    def __init__(self, content=None, tool_calls=None):
+        self.content = content
+        self.tool_calls = tool_calls or []
+
+    def model_dump(self):
+        return {"content": self.content, "tool_calls": [tc.model_dump() for tc in self.tool_calls]}
+
+
+class FakeToolCall:
+    def __init__(self, call_id: str, name: str, args: dict):
+        import json
+        self.id = call_id
+        self.type = "function"
+        self.function = type("F", (), {"name": name, "arguments": json.dumps(args)})()
+
+    def model_dump(self):
+        import json
+        return {"id": self.id, "type": "function",
+                "function": {"name": self.function.name,
+                             "arguments": self.function.arguments}}
+
+
+class FakeChoice:
+    def __init__(self, message): self.message = message
+
+
+class FakeResponse:
+    def __init__(self, message, usage=None):
+        self.choices = [FakeChoice(message)]
+        self.usage = usage
+
+
+class FakeUsage:
+    def __init__(self, total_tokens): self.total_tokens = total_tokens
+
+
+class ScriptedClient:
+    """Returns FakeResponses from a pre-recorded list."""
+    def __init__(self, responses): self._responses = list(responses); self.calls = 0
+    def chat_completions(self, *, messages, tools, tool_choice="auto"):
+        self.calls += 1
+        return self._responses.pop(0)
+
+
+def test_completes_immediately_when_qwen_returns_text(working_dir: Path):
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content="Done.", tool_calls=[]),
+                     usage=FakeUsage(100)),
+    ])
+    result = run_delegation(
+        client=client,
+        working_dir=working_dir,
+        task="say done",
+        context_hints=[],
+        max_steps=10, timeout_seconds=10, max_tokens_total=10_000,
+    )
+    assert isinstance(result, AgentResult)
+    assert result.stop_reason == "complete"
+    assert result.result == "Done."
+    assert result.steps == 1
+
+
+def test_executes_tool_call_then_completes(working_dir: Path):
+    (working_dir / "x.txt").write_text("hello")
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content=None, tool_calls=[
+            FakeToolCall("c1", "read_file", {"path": "x.txt"}),
+        ]), usage=FakeUsage(50)),
+        FakeResponse(FakeMessage(content="I read x.txt: hello", tool_calls=[]),
+                     usage=FakeUsage(100)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="read x.txt",
+        context_hints=[], max_steps=10, timeout_seconds=10,
+        max_tokens_total=10_000,
+    )
+    assert result.stop_reason == "complete"
+    assert "hello" in result.result
+    assert result.steps == 2
+
+
+def test_writes_transcript_file(working_dir: Path):
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content="ok"), usage=FakeUsage(10)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=10,
+        max_tokens_total=10_000,
+    )
+    transcript_path = Path(result.transcript_path)
+    assert transcript_path.exists()
+    contents = transcript_path.read_text()
+    assert "assistant" in contents
