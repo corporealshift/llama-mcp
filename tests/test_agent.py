@@ -158,3 +158,80 @@ def test_timeout_enforced(working_dir: Path, monkeypatch):
         max_tokens_total=1_000_000,
     )
     assert result.stop_reason == "timeout"
+
+
+def test_malformed_tool_args_returned_as_error_to_qwen(working_dir: Path):
+    """Qwen sends invalid JSON; loop continues and Qwen self-corrects."""
+    bad_call = FakeToolCall("c1", "read_file", {})
+    bad_call.function.arguments = "{not json"
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content=None, tool_calls=[bad_call]),
+                     usage=FakeUsage(10)),
+        FakeResponse(FakeMessage(content="recovered"), usage=FakeUsage(10)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=10_000,
+    )
+    assert result.stop_reason == "complete"
+    assert result.steps == 2
+
+
+def test_unknown_tool_name_returned_as_error(working_dir: Path):
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content=None, tool_calls=[
+            FakeToolCall("c1", "no_such_tool", {})]),
+            usage=FakeUsage(10)),
+        FakeResponse(FakeMessage(content="recovered"), usage=FakeUsage(10)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=10_000,
+    )
+    assert result.stop_reason == "complete"
+
+
+def test_files_changed_accounting(working_dir: Path):
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content=None, tool_calls=[
+            FakeToolCall("c1", "write_file",
+                         {"path": "a.txt", "content": "hi"}),
+        ]), usage=FakeUsage(10)),
+        FakeResponse(FakeMessage(content="done"), usage=FakeUsage(10)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=10_000,
+    )
+    assert any(p.endswith("a.txt") for p in result.files_changed)
+
+
+def test_commands_run_accounting(working_dir: Path):
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content=None, tool_calls=[
+            FakeToolCall("c1", "run_command", {"command": "echo hi"}),
+        ]), usage=FakeUsage(10)),
+        FakeResponse(FakeMessage(content="done"), usage=FakeUsage(10)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=10_000,
+    )
+    assert "echo hi" in result.commands_run
+
+
+def test_openai_client_error_yields_error_stop_reason(working_dir: Path):
+    class BrokenClient:
+        def chat_completions(self, **kw): raise RuntimeError("boom")
+
+    result = run_delegation(
+        client=BrokenClient(), working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=10_000,
+    )
+    assert result.stop_reason == "error"
+    assert "boom" in result.result
