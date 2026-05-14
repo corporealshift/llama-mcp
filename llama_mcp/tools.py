@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from qwen_mcp.sandbox import safe_resolve
+from llama_mcp.sandbox import safe_resolve
 
 MAX_RESULT_BYTES = 8 * 1024
 
@@ -112,7 +112,8 @@ def run_command(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     start = _now_ms()
     try:
         proc = subprocess.run(
-            ["bash", "-lc", command],
+            command,
+            shell=True,
             cwd=ctx.working_dir,
             capture_output=True,
             text=True,
@@ -248,7 +249,7 @@ _HANDLERS: dict[str, Callable[[ToolContext, dict[str, Any]], dict[str, Any]]] = 
 def dispatch(ctx: ToolContext, name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Run a tool by name. Errors are returned to the caller as structured dicts.
 
-    The agent loop turns these into a `tool` message so Qwen can self-correct.
+    The agent loop turns these into a `tool` message so the model can self-correct.
     """
     handler = _HANDLERS.get(name)
     if handler is None:

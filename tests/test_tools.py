@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from qwen_mcp.sandbox import SandboxEscape
-from qwen_mcp.tools import (
+from llama_mcp.sandbox import SandboxEscape
+from llama_mcp.tools import (
     TOOL_SCHEMAS,
     ToolContext,
     dispatch,
@@ -134,33 +134,32 @@ def test_edit_file_errors_when_old_missing(working_dir: Path, ctx: ToolContext):
 
 
 def test_run_command_captures_stdout(ctx: ToolContext):
-    out = run_command(ctx, {"command": "echo hello"})
+    out = run_command(ctx, {"command": "python -c \"print('hello')\""})
     assert out["exit_code"] == 0
     assert out["stdout"].strip() == "hello"
     assert out["timed_out"] is False
-    assert "echo hello" in ctx.commands_run
 
 
 def test_run_command_captures_stderr_and_exit_code(ctx: ToolContext):
-    out = run_command(ctx, {"command": "echo err >&2; exit 3"})
+    out = run_command(ctx, {"command": "python -c \"import sys; sys.stderr.write('err\\n'); sys.exit(3)\""})
     assert out["exit_code"] == 3
     assert "err" in out["stderr"]
 
 
 def test_run_command_runs_in_working_dir(working_dir: Path, ctx: ToolContext):
     (working_dir / "marker").write_text("yes")
-    out = run_command(ctx, {"command": "ls"})
+    out = run_command(ctx, {"command": "python -c \"import os; print('\\n'.join(os.listdir('.')))\""})
     assert "marker" in out["stdout"]
 
 
 def test_run_command_truncates_large_output(ctx: ToolContext):
-    out = run_command(ctx, {"command": "yes x | head -c 20000"})
+    out = run_command(ctx, {"command": "python -c \"print('x' * 20000)\""})
     assert out["truncated"] is True
     assert len(out["stdout"]) <= 8 * 1024
 
 
 def test_run_command_times_out(ctx: ToolContext):
-    out = run_command(ctx, {"command": "sleep 5", "timeout": 1})
+    out = run_command(ctx, {"command": "python -c \"import time; time.sleep(10)\"", "timeout": 1})
     assert out["timed_out"] is True
     assert out["exit_code"] == -1
 

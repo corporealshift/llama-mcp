@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from qwen_mcp.openai_client import QwenClient
+from llama_mcp.openai_client import LlamaClient
 
 
 class _FakeOpenAI:
@@ -26,9 +26,9 @@ class _FakeOpenAI:
 
 def test_returns_response_on_success():
     fake = _FakeOpenAI([{"choices": [{"message": {"content": "ok"}}]}])
-    client = QwenClient.__new__(QwenClient)
+    client = LlamaClient.__new__(LlamaClient)
     client._client = fake
-    client._model = "qwen"
+    client._model = "llama"
     out = client.chat_completions(messages=[], tools=[])
     assert out == {"choices": [{"message": {"content": "ok"}}]}
     assert fake.calls == 1
@@ -38,9 +38,9 @@ def test_retries_on_connection_error_then_succeeds():
     import openai
     err = openai.APIConnectionError(request=MagicMock())
     fake = _FakeOpenAI([err, err, {"choices": []}])
-    client = QwenClient.__new__(QwenClient)
+    client = LlamaClient.__new__(LlamaClient)
     client._client = fake
-    client._model = "qwen"
+    client._model = "llama"
     client._sleep = lambda s: None  # don't actually sleep
     out = client.chat_completions(messages=[], tools=[])
     assert fake.calls == 3
@@ -51,9 +51,9 @@ def test_gives_up_after_three_retries():
     import openai
     err = openai.APIConnectionError(request=MagicMock())
     fake = _FakeOpenAI([err, err, err, err])
-    client = QwenClient.__new__(QwenClient)
+    client = LlamaClient.__new__(LlamaClient)
     client._client = fake
-    client._model = "qwen"
+    client._model = "llama"
     client._sleep = lambda s: None
     with pytest.raises(openai.APIConnectionError):
         client.chat_completions(messages=[], tools=[])
@@ -66,9 +66,9 @@ def test_4xx_not_retried():
         message="bad", response=MagicMock(status_code=400), body=None
     )
     fake = _FakeOpenAI([err])
-    client = QwenClient.__new__(QwenClient)
+    client = LlamaClient.__new__(LlamaClient)
     client._client = fake
-    client._model = "qwen"
+    client._model = "llama"
     client._sleep = lambda s: None
     with pytest.raises(openai.BadRequestError):
         client.chat_completions(messages=[], tools=[])

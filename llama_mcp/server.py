@@ -1,4 +1,4 @@
-"""FastMCP entry point that exposes the `delegate_to_qwen` tool."""
+"""FastMCP entry point that exposes the `delegate_to_llama` tool."""
 from __future__ import annotations
 
 import logging
@@ -7,9 +7,9 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from qwen_mcp import config as config_module
-from qwen_mcp.agent import run_delegation
-from qwen_mcp.openai_client import QwenClient
+from llama_mcp import config as config_module
+from llama_mcp.agent import run_delegation
+from llama_mcp.openai_client import LlamaClient
 
 
 def build_server() -> FastMCP:
@@ -20,11 +20,11 @@ def build_server() -> FastMCP:
         stream=sys.stderr,
     )
 
-    server = FastMCP("qwen-mcp")
-    client = QwenClient(cfg)
+    server = FastMCP("llama-mcp")
+    client = LlamaClient(cfg)
 
     @server.tool()
-    def delegate_to_qwen(
+    def delegate_to_llama(
         task: str,
         working_dir: str,
         context_hints: list[str] | None = None,
@@ -32,12 +32,12 @@ def build_server() -> FastMCP:
         timeout_seconds: int | None = None,
         max_tokens_total: int | None = None,
     ) -> dict:
-        """Delegate a coding subtask to a local Qwen instance.
+        """Delegate a coding subtask to a local llama.cpp instance.
 
         Args:
-            task: Self-contained description of what Qwen should do.
+            task: Self-contained description of what the model should do.
             working_dir: Absolute path; sandbox root for all file tools.
-            context_hints: Files Qwen should look at first (optional).
+            context_hints: Files the model should look at first (optional).
             max_steps: Override default tool-call rounds.
             timeout_seconds: Override wall-clock cap.
             max_tokens_total: Override total-token cap.
@@ -109,7 +109,7 @@ def _validate_inputs(
 
 
 def main() -> None:
-    """Entry point for the `qwen-mcp` console script."""
+    """Entry point for the `llama-mcp` console script."""
     server = build_server()
     server.run()  # FastMCP defaults to stdio transport.
 

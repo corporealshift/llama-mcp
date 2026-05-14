@@ -6,10 +6,10 @@ from typing import Any
 
 import openai
 
-from qwen_mcp.config import Config
+from llama_mcp.config import Config
 
 
-class QwenClient:
+class LlamaClient:
     def __init__(self, config: Config) -> None:
         self._client = openai.OpenAI(
             base_url=config.base_url,

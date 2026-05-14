@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from qwen_mcp.agent import AgentResult, run_delegation
+from llama_mcp.agent import AgentResult, run_delegation
 
 
 class FakeMessage:
@@ -144,7 +144,7 @@ def test_token_limit_enforced(working_dir: Path):
 
 def test_timeout_enforced(working_dir: Path, monkeypatch):
     """Timeout is checked at top of loop; we fake the clock."""
-    import qwen_mcp.agent as agent_mod
+    import llama_mcp.agent as agent_mod
     fake_now = [1000.0]
     def fake_monotonic():
         fake_now[0] += 0.6

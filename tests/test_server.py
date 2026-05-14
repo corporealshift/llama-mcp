@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from qwen_mcp.server import _validate_inputs, build_server
+from llama_mcp.server import _validate_inputs, build_server
 
 
 def test_validate_inputs_accepts_valid(working_dir: Path):
@@ -53,9 +53,9 @@ def test_validate_inputs_rejects_bad_step_count(working_dir: Path):
 
 
 def test_build_server_registers_delegate_tool():
-    """The server exposes a `delegate_to_qwen` tool."""
+    """The server exposes a `delegate_to_llama` tool."""
     server = build_server()
     # FastMCP exposes _tool_manager._tools (or similar); we test via list_tools.
     tools = server._tool_manager.list_tools()  # internal API; acceptable for a smoke check
     names = [t.name for t in tools]
-    assert "delegate_to_qwen" in names
+    assert "delegate_to_llama" in names

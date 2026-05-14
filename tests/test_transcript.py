@@ -2,12 +2,12 @@
 import json
 from pathlib import Path
 
-from qwen_mcp.transcript import Transcript, ensure_gitignore_entry
+from llama_mcp.transcript import Transcript, ensure_gitignore_entry
 
 
 def test_transcript_creates_directory(working_dir: Path):
     t = Transcript.open(working_dir)
-    assert (working_dir / ".qwen-delegations").is_dir()
+    assert (working_dir / ".llama-delegations").is_dir()
     t.close()
 
 
@@ -35,20 +35,20 @@ def test_transcript_appends_jsonl(working_dir: Path):
 def test_ensure_gitignore_entry_adds_when_missing(working_dir: Path):
     gitignore = working_dir / ".gitignore"
     gitignore.write_text("__pycache__/\n")
-    ensure_gitignore_entry(working_dir, ".qwen-delegations/")
+    ensure_gitignore_entry(working_dir, ".llama-delegations/")
     contents = gitignore.read_text()
-    assert ".qwen-delegations/" in contents
+    assert ".llama-delegations/" in contents
 
 
 def test_ensure_gitignore_entry_idempotent(working_dir: Path):
     gitignore = working_dir / ".gitignore"
-    gitignore.write_text("__pycache__/\n.qwen-delegations/\n")
-    ensure_gitignore_entry(working_dir, ".qwen-delegations/")
+    gitignore.write_text("__pycache__/\n.llama-delegations/\n")
+    ensure_gitignore_entry(working_dir, ".llama-delegations/")
     # File should still contain only one occurrence
-    assert gitignore.read_text().count(".qwen-delegations/") == 1
+    assert gitignore.read_text().count(".llama-delegations/") == 1
 
 
 def test_ensure_gitignore_entry_skips_when_no_gitignore(working_dir: Path):
     """Don't create a .gitignore where none exists."""
-    ensure_gitignore_entry(working_dir, ".qwen-delegations/")
+    ensure_gitignore_entry(working_dir, ".llama-delegations/")
     assert not (working_dir / ".gitignore").exists()

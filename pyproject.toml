@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "qwen-mcp"
+name = "llama-mcp"
 version = "0.1.0"
-description = "MCP server that delegates code-writing subtasks to local Qwen via llama.cpp"
+description = "MCP server that delegates code-writing subtasks to a local model via llama.cpp"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.2.0",
@@ -19,10 +19,10 @@ dev = [
 ]
 
 [project.scripts]
-qwen-mcp = "qwen_mcp.server:main"
+llama-mcp = "llama_mcp.server:main"
 
 [tool.setuptools.packages.find]
-include = ["qwen_mcp*"]
+include = ["llama_mcp*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

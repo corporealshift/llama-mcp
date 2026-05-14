@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TextIO
 
-DELEGATIONS_DIR = ".qwen-delegations"
+DELEGATIONS_DIR = ".llama-delegations"
 
 
 class Transcript:

@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from qwen_mcp.tools import MAX_RESULT_BYTES, TOOL_SCHEMAS, ToolContext, dispatch
-from qwen_mcp.transcript import Transcript
+from llama_mcp.tools import MAX_RESULT_BYTES, TOOL_SCHEMAS, ToolContext, dispatch
+from llama_mcp.transcript import Transcript
 
 SYSTEM_PROMPT = """\
 You are a code-writing subagent. A more capable orchestrator delegated this

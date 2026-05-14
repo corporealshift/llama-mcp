@@ -2,11 +2,11 @@
 """Manual end-to-end smoke test against a running llama-server.
 
 Requires:
-  - llama-server running on the configured QWEN_BASE_URL with a Qwen GGUF
+  - llama-server running on the configured LLAMA_BASE_URL with a model GGUF
     loaded and --jinja enabled.
 
 Usage:
-  source .venv/bin/activate
+  .venv\\Scripts\\activate
   python scripts/smoke.py
 """
 from __future__ import annotations
@@ -16,18 +16,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-from qwen_mcp.agent import run_delegation
-from qwen_mcp.config import load
-from qwen_mcp.openai_client import QwenClient
+from llama_mcp.agent import run_delegation
+from llama_mcp.config import load
+from llama_mcp.openai_client import LlamaClient
 
 
 def main() -> int:
     cfg = load()
     print(f"Using base_url={cfg.base_url} model={cfg.model}", file=sys.stderr)
 
-    workdir = Path(tempfile.mkdtemp(prefix="qwen-smoke-"))
+    workdir = Path(tempfile.mkdtemp(prefix="llama-smoke-"))
     try:
-        client = QwenClient(cfg)
+        client = LlamaClient(cfg)
         result = run_delegation(
             client=client,
             working_dir=workdir,

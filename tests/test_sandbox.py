@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from qwen_mcp.sandbox import SandboxEscape, safe_resolve
+from llama_mcp.sandbox import SandboxEscape, safe_resolve
 
 
 def test_relative_path_resolves_under_root(working_dir: Path):
@@ -29,6 +29,10 @@ def test_absolute_path_outside_root_rejected(working_dir: Path):
         safe_resolve(working_dir, "/etc/passwd")
 
 
+@pytest.mark.skipif(
+    __import__("sys").platform == "win32",
+    reason="symlink creation requires elevated privileges on Windows",
+)
 def test_symlink_pointing_outside_rejected(working_dir: Path, tmp_path_factory):
     outside = tmp_path_factory.mktemp("outside") / "secret.txt"
     outside.write_text("nope")
