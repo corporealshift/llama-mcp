@@ -30,6 +30,19 @@ Rules:
 Available tools: read_file, list_dir, glob, write_file, edit_file, run_command.
 """
 
+# llama.cpp intermittently fails to parse a tool call and leaves it as raw
+# <tool_call> text (often inside reasoning_content), returning empty tool_calls.
+# Such a turn is neither a real answer nor a usable call — reprompt rather than
+# mistake it for completion. Give up after this many consecutive bad turns.
+MAX_CONSECUTIVE_MALFORMED = 3
+
+MALFORMED_REPROMPT = (
+    "Your previous response contained no usable tool call and no final answer. "
+    "If you meant to call a tool, emit it as a proper tool/function call — not "
+    "as text and not inside your reasoning. If the task is finished, reply with "
+    "a plain-text summary. Continue now."
+)
+
 
 class ChatClient(Protocol):
     def chat_completions(self, *, messages, tools, tool_choice="auto") -> Any: ...
@@ -75,6 +88,7 @@ def run_delegation(
     last_assistant_text: str = ""
     tokens_used = 0
     step = 0
+    malformed_streak = 0
     deadline = time.monotonic() + timeout_seconds
 
     try:
@@ -111,11 +125,26 @@ def run_delegation(
 
             tool_calls = getattr(msg, "tool_calls", None) or []
             if not tool_calls:
+                if _is_malformed_turn(msg):
+                    malformed_streak += 1
+                    transcript.append({"step": step, "type": "malformed",
+                                       "streak": malformed_streak})
+                    _log(f"step={step} malformed streak={malformed_streak}")
+                    if malformed_streak >= MAX_CONSECUTIVE_MALFORMED:
+                        stop_reason = "malformed"
+                        last_assistant_text = (
+                            "Subagent produced no valid tool call or final "
+                            f"answer in {malformed_streak} consecutive attempts."
+                        )
+                        break
+                    messages.append({"role": "user", "content": MALFORMED_REPROMPT})
+                    continue
                 last_assistant_text = msg.content or ""
                 stop_reason = "complete"
                 _log(f"step={step} complete dur_ms={int((time.monotonic()-t0)*1000)}")
                 break
 
+            malformed_streak = 0
             last_assistant_text = msg.content or last_assistant_text
 
             for call in tool_calls:
@@ -158,6 +187,19 @@ def run_delegation(
 
 def _log(line: str) -> None:
     print(line, file=sys.stderr, flush=True)
+
+
+def _is_malformed_turn(msg: Any) -> bool:
+    """True for a no-tool-call turn that is not a genuine final answer.
+
+    Catches the two ways llama.cpp drops a tool call: a `<tool_call>` block
+    leaked as raw text into content or reasoning_content, or an empty message.
+    """
+    content = getattr(msg, "content", None) or ""
+    reasoning = getattr(msg, "reasoning_content", None) or ""
+    if "<tool_call>" in content or "<tool_call>" in reasoning:
+        return True
+    return not content.strip()
 
 
 def _to_jsonable(msg: Any) -> Any:

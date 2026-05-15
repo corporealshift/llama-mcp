@@ -8,12 +8,14 @@ from llama_mcp.agent import AgentResult, run_delegation
 
 
 class FakeMessage:
-    def __init__(self, content=None, tool_calls=None):
+    def __init__(self, content=None, tool_calls=None, reasoning_content=None):
         self.content = content
         self.tool_calls = tool_calls or []
+        self.reasoning_content = reasoning_content
 
     def model_dump(self):
-        return {"content": self.content, "tool_calls": [tc.model_dump() for tc in self.tool_calls]}
+        return {"content": self.content, "reasoning_content": self.reasoning_content,
+                "tool_calls": [tc.model_dump() for tc in self.tool_calls]}
 
 
 class FakeToolCall:
@@ -222,6 +224,59 @@ def test_commands_run_accounting(working_dir: Path):
         max_tokens_total=10_000,
     )
     assert "echo hi" in result.commands_run
+
+
+def test_empty_turn_reprompts_instead_of_reporting_complete(working_dir: Path):
+    """An empty message (no content, no tool calls) is not a completion."""
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content="", tool_calls=[]), usage=FakeUsage(10)),
+        FakeResponse(FakeMessage(content="Finished.", tool_calls=[]), usage=FakeUsage(10)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=10_000,
+    )
+    assert result.stop_reason == "complete"
+    assert result.result == "Finished."
+    assert result.steps == 2
+
+
+def test_tool_call_leaked_into_reasoning_reprompts(working_dir: Path):
+    """A <tool_call> left as raw text in reasoning_content is malformed, not done."""
+    leaked = FakeMessage(
+        content="",
+        reasoning_content="I should read it.\n<tool_call>\n<function=read_file>\n"
+                          "<parameter=path>\nx.txt\n</parameter>\n</function>\n</tool_call>",
+        tool_calls=[],
+    )
+    client = ScriptedClient([
+        FakeResponse(leaked, usage=FakeUsage(10)),
+        FakeResponse(FakeMessage(content="Done.", tool_calls=[]), usage=FakeUsage(10)),
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=10_000,
+    )
+    assert result.stop_reason == "complete"
+    assert result.result == "Done."
+    assert result.steps == 2
+
+
+def test_persistent_malformed_turns_yield_malformed_stop_reason(working_dir: Path):
+    """When reprompting keeps failing, the delegation stops with an honest reason."""
+    client = ScriptedClient([
+        FakeResponse(FakeMessage(content="", tool_calls=[]), usage=FakeUsage(10))
+        for _ in range(6)
+    ])
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=10_000,
+    )
+    assert result.stop_reason == "malformed"
+    assert result.steps == 3
 
 
 def test_openai_client_error_yields_error_stop_reason(working_dir: Path):
