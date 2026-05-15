@@ -1,5 +1,7 @@
 """Tests for the tool dispatcher and individual handlers."""
 import json
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -40,10 +42,20 @@ def test_read_file_truncates_large_content(working_dir: Path, ctx: ToolContext):
     assert out["total_bytes"] == 20_000
 
 
-def test_read_file_offset_and_limit(working_dir: Path, ctx: ToolContext):
-    (working_dir / "f.txt").write_text("0123456789")
-    out = read_file(ctx, {"path": "f.txt", "offset": 3, "limit": 4})
-    assert out["content"] == "3456"
+def test_read_file_offset_and_limit_select_lines(working_dir: Path, ctx: ToolContext):
+    """offset/limit are line-based — that is how models page files."""
+    (working_dir / "f.txt").write_text(
+        "line0\nline1\nline2\nline3\nline4\n", newline="\n")
+    out = read_file(ctx, {"path": "f.txt", "offset": 1, "limit": 2})
+    assert out["content"] == "line1\nline2\n"
+    assert out["total_lines"] == 5
+
+
+def test_read_file_offset_past_end_returns_empty(working_dir: Path, ctx: ToolContext):
+    (working_dir / "f.txt").write_text("line0\nline1\n", newline="\n")
+    out = read_file(ctx, {"path": "f.txt", "offset": 99})
+    assert out["content"] == ""
+    assert out["total_lines"] == 2
 
 
 def test_read_file_sandbox_escape_raises(working_dir: Path, ctx: ToolContext):
@@ -152,6 +164,15 @@ def test_run_command_runs_in_working_dir(working_dir: Path, ctx: ToolContext):
     assert "marker" in out["stdout"]
 
 
+@pytest.mark.skipif(not sys.platform.startswith("win"),
+                    reason="PowerShell invocation is Windows-specific")
+def test_run_command_uses_powershell_on_windows(ctx: ToolContext):
+    """Commands run under PowerShell, not cmd.exe — the model writes PS syntax."""
+    out = run_command(ctx, {"command": "Write-Output 'pwsh-ok'"})
+    assert out["exit_code"] == 0
+    assert "pwsh-ok" in out["stdout"]
+
+
 def test_run_command_truncates_large_output(ctx: ToolContext):
     out = run_command(ctx, {"command": "python -c \"print('x' * 20000)\""})
     assert out["truncated"] is True
@@ -162,6 +183,16 @@ def test_run_command_times_out(ctx: ToolContext):
     out = run_command(ctx, {"command": "python -c \"import time; time.sleep(10)\"", "timeout": 1})
     assert out["timed_out"] is True
     assert out["exit_code"] == -1
+
+
+def test_run_command_timeout_returns_promptly(ctx: ToolContext):
+    """A child outliving the timeout must not block the return on its pipes."""
+    start = time.monotonic()
+    out = run_command(ctx, {"command": "python -c \"import time; time.sleep(30)\"",
+                            "timeout": 2})
+    elapsed = time.monotonic() - start
+    assert out["timed_out"] is True
+    assert elapsed < 15, f"run_command blocked {elapsed:.0f}s on a killed child"
 
 
 def test_dispatch_unknown_tool(ctx: ToolContext):

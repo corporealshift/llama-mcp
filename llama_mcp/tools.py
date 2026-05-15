@@ -5,7 +5,9 @@ File handlers route paths through sandbox.safe_resolve. run_command does not.
 """
 from __future__ import annotations
 
+import base64
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -28,21 +30,25 @@ class ToolContext:
 def read_file(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     path = safe_resolve(ctx.working_dir, args["path"])
     raw = path.read_bytes()
-    total = len(raw)
+    total_bytes = len(raw)
 
+    lines = raw.decode("utf-8", errors="replace").splitlines(keepends=True)
+    total_lines = len(lines)
+
+    # offset/limit are line-based: models page files by line number, not byte.
     offset = args.get("offset", 0)
     limit = args.get("limit")
-    chunk = raw[offset:] if limit is None else raw[offset:offset + limit]
+    selected = lines[offset:] if limit is None else lines[offset:offset + limit]
+    chunk = "".join(selected)
 
     truncated = False
-    if len(chunk) > MAX_RESULT_BYTES:
-        chunk = chunk[:MAX_RESULT_BYTES]
+    encoded = chunk.encode("utf-8")
+    if len(encoded) > MAX_RESULT_BYTES:
+        chunk = encoded[:MAX_RESULT_BYTES].decode("utf-8", "replace")
         truncated = True
 
-    text = chunk.decode("utf-8", errors="replace")
-    if limit is None and offset == 0 and total > MAX_RESULT_BYTES:
-        truncated = True
-    return {"content": text, "truncated": truncated, "total_bytes": total}
+    return {"content": chunk, "truncated": truncated,
+            "total_lines": total_lines, "total_bytes": total_bytes}
 
 
 def list_dir(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -109,20 +115,24 @@ def run_command(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 
     ctx.commands_run.append(command)
 
+    proc = subprocess.Popen(
+        _shell_argv(command),
+        cwd=ctx.working_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        **_process_group_kwargs(),
+    )
     start = _now_ms()
     try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            cwd=ctx.working_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        stdout, stderr, exit_code, timed_out = proc.stdout, proc.stderr, proc.returncode, False
-    except subprocess.TimeoutExpired as e:
-        stdout = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-        stderr = e.stderr.decode("utf-8", "replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+        stdout, stderr = proc.communicate(timeout=timeout)
+        exit_code = proc.returncode
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        # subprocess.run would kill only the shell here, leaving grandchildren
+        # holding the pipes — communicate() then blocks until they exit.
+        _kill_tree(proc)
+        stdout, stderr = proc.communicate()
         exit_code = -1
         timed_out = True
     duration_ms = _now_ms() - start
@@ -146,13 +156,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a file's contents. Returns up to ~8KB; use offset/limit for paging.",
+            "description": "Read a file's contents. Returns up to ~8KB of text plus "
+                           "total_lines; page large files with offset/limit.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path relative to the working directory."},
-                    "offset": {"type": "integer", "minimum": 0},
-                    "limit": {"type": "integer", "minimum": 1},
+                    "offset": {"type": "integer", "minimum": 0,
+                               "description": "0-based line number to start reading from."},
+                    "limit": {"type": "integer", "minimum": 1,
+                              "description": "Maximum number of lines to return."},
                 },
                 "required": ["path"],
             },
@@ -261,6 +274,45 @@ def dispatch(ctx: ToolContext, name: str, args: dict[str, Any]) -> dict[str, Any
 
 
 # ---- Private helpers ---------------------------------------------------------
+
+def _shell_argv(command: str) -> list[str]:
+    """Wrap a shell command string into an argv list for the platform shell.
+
+    Windows uses PowerShell (not cmd.exe) so the model's PowerShell syntax runs.
+    The command is passed via -EncodedCommand: PowerShell's plain -Command
+    re-tokenizes argv and silently mangles nested quotes, so a base64 UTF-16LE
+    blob is the only form that survives verbatim. `exit $LASTEXITCODE` is
+    appended (on its own line, so a trailing `#` comment can't swallow it) so a
+    native command's exit code propagates instead of PowerShell's own.
+    """
+    if sys.platform.startswith("win"):
+        wrapped = command + "\nexit $LASTEXITCODE"
+        encoded = base64.b64encode(wrapped.encode("utf-16-le")).decode("ascii")
+        return ["powershell.exe", "-NoProfile", "-NonInteractive",
+                "-EncodedCommand", encoded]
+    return ["/bin/sh", "-c", command]
+
+
+def _process_group_kwargs() -> dict[str, Any]:
+    """Popen kwargs that make a command's children killable as one unit."""
+    if sys.platform.startswith("win"):
+        return {}  # taskkill /T walks the tree by PID; no process group needed.
+    return {"start_new_session": True}
+
+
+def _kill_tree(proc: "subprocess.Popen[Any]") -> None:
+    """Kill the command and every descendant so none can hold the pipes open."""
+    if sys.platform.startswith("win"):
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       capture_output=True)
+    else:
+        import os
+        import signal
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+
 
 def _now_ms() -> int:
     import time
