@@ -43,7 +43,11 @@ class FakeResponse:
 
 
 class FakeUsage:
-    def __init__(self, total_tokens): self.total_tokens = total_tokens
+    def __init__(self, prompt_tokens=0, completion_tokens=0, total_tokens=None):
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = (total_tokens if total_tokens is not None
+                             else prompt_tokens + completion_tokens)
 
 
 class ScriptedClient:
@@ -124,24 +128,44 @@ def test_max_steps_enforced(working_dir: Path):
     assert result.steps == 3
 
 
-def test_token_limit_enforced(working_dir: Path):
-    """Total tokens crosses the cap before the loop exits naturally."""
+def test_context_limit_enforced(working_dir: Path):
+    """Stops when the latest response's context occupancy crosses the cap."""
     client = ScriptedClient([
         FakeResponse(FakeMessage(content=None, tool_calls=[
             FakeToolCall("c1", "list_dir", {"path": "."}),
-        ]), usage=FakeUsage(700)),
-        FakeResponse(FakeMessage(content=None, tool_calls=[
-            FakeToolCall("c2", "list_dir", {"path": "."}),
-        ]), usage=FakeUsage(700)),
-        # Should not be reached — token cap trips first.
-        FakeResponse(FakeMessage(content="never seen"), usage=FakeUsage(10)),
+        ]), usage=FakeUsage(prompt_tokens=900, completion_tokens=200)),
+        # Not reached — the context cap trips at the top of the next step.
+        FakeResponse(FakeMessage(content="never seen"),
+                     usage=FakeUsage(prompt_tokens=10, completion_tokens=10)),
     ])
     result = run_delegation(
         client=client, working_dir=working_dir, task="x",
         context_hints=[], max_steps=10, timeout_seconds=60,
         max_tokens_total=1000,
     )
-    assert result.stop_reason == "token_limit"
+    assert result.stop_reason == "context_limit"
+    assert result.steps == 1
+
+
+def test_per_turn_tokens_are_not_summed(working_dir: Path):
+    """The metric is current context size, not cumulative spend: many small
+    turns must not accumulate into the cap."""
+    client = ScriptedClient(
+        [
+            FakeResponse(FakeMessage(content=None, tool_calls=[
+                FakeToolCall(f"c{i}", "list_dir", {"path": "."}),
+            ]), usage=FakeUsage(prompt_tokens=600, completion_tokens=100))
+            for i in range(5)
+        ]
+        + [FakeResponse(FakeMessage(content="done"),
+                        usage=FakeUsage(prompt_tokens=600, completion_tokens=100))]
+    )
+    result = run_delegation(
+        client=client, working_dir=working_dir, task="x",
+        context_hints=[], max_steps=10, timeout_seconds=60,
+        max_tokens_total=1000,
+    )
+    assert result.stop_reason == "complete"
 
 
 def test_timeout_enforced(working_dir: Path, monkeypatch):

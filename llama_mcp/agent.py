@@ -86,7 +86,7 @@ def run_delegation(
     ]
 
     last_assistant_text: str = ""
-    tokens_used = 0
+    context_tokens = 0
     step = 0
     malformed_streak = 0
     deadline = time.monotonic() + timeout_seconds
@@ -97,8 +97,8 @@ def run_delegation(
                 stop_reason = "max_steps"; break
             if time.monotonic() >= deadline:
                 stop_reason = "timeout"; break
-            if tokens_used >= max_tokens_total:
-                stop_reason = "token_limit"; break
+            if context_tokens >= max_tokens_total:
+                stop_reason = "context_limit"; break
 
             step += 1
             t0 = time.monotonic()
@@ -114,9 +114,14 @@ def run_delegation(
                 last_assistant_text = f"OpenAI client error: {e}"
                 break
 
+            # Current context occupancy — NOT a running total. prompt_tokens
+            # is the whole history sent this turn; + completion_tokens ≈ what
+            # the next turn carries. Summing total_tokens across steps would
+            # recount the growing history and trip the cap ~3-6x too early.
             usage = getattr(resp, "usage", None)
             if usage is not None:
-                tokens_used += getattr(usage, "total_tokens", 0) or 0
+                context_tokens = ((getattr(usage, "prompt_tokens", 0) or 0)
+                                  + (getattr(usage, "completion_tokens", 0) or 0))
 
             msg = resp.choices[0].message
             transcript.append({"step": step, "type": "assistant",
@@ -172,7 +177,7 @@ def run_delegation(
             stop_reason = "complete"  # unreachable; loop exits via break
     finally:
         transcript.append({"type": "meta", "stop_reason": locals().get("stop_reason", "error"),
-                           "steps": step, "tokens_used": tokens_used})
+                           "steps": step, "context_tokens": context_tokens})
         transcript.close()
 
     return AgentResult(
