@@ -1,4 +1,5 @@
 """Server configuration: env loading."""
+
 from __future__ import annotations
 
 import os
@@ -24,11 +25,9 @@ def load() -> Config:
         base_url=base_url,
         model=os.environ.get("LLAMA_MODEL", "llama"),
         api_key=os.environ.get("LLAMA_API_KEY", "sk-no-key"),
-        default_max_steps=_int_env("LLAMA_DEFAULT_MAX_STEPS", 45),
+        default_max_steps=_int_env("LLAMA_DEFAULT_MAX_STEPS", 100),
         default_timeout_seconds=_int_env("LLAMA_DEFAULT_TIMEOUT_SECONDS", 1800),
-        default_max_tokens_total=_int_env(
-            "LLAMA_DEFAULT_MAX_TOKENS_TOTAL", 200_000
-        ),
+        default_max_tokens_total=_int_env("LLAMA_DEFAULT_MAX_TOKENS_TOTAL", 200_000),
         log_level=os.environ.get("LLAMA_LOG_LEVEL", "INFO"),
     )
 
